@@ -137,3 +137,77 @@ def gripper(k, position: float, timeout=5.0, tol=0.01) -> dict:
         last = cur
         time.sleep(0.05)
     return {"ok": False, "event": "TIMEOUT", "position": state.gripper_position(k)}
+
+
+# ---- multi-turn rotation of a continuous joint ---------------------------------------------------
+ROTATE_CHUNK_DEG = 120.0      # well under 180 so each chunk's direction and read-back are unambiguous
+ROTATE_TOL_DEG = 1.5
+ROTATE_MIN_TIME_FRAC = 0.6    # a chunk that finishes much faster than commanded means the speed limit was ignored
+
+
+def rotate_chunks(delta_deg, speed_dps, read_joint, send_chunk, others_moved=lambda: 0.0,
+                  chunk_deg=ROTATE_CHUNK_DEG, tol_deg=ROTATE_TOL_DEG, clock=time.time) -> dict:
+    """Turn one joint by delta_deg (any size, signed) as a series of absolute-angle moves.
+
+    read_joint() -> current angle in (-180, 180];  send_chunk(target_deg, timeout_s) -> result dict.
+    Position targets fail safe: if the caller dies mid-way the arm finishes the current chunk and
+    stops. Each chunk is verified (angle reached, took about as long as the speed implies, other
+    joints still); the first anomaly ends the rotation and nothing is retried.
+    """
+    n = max(1, int(-(-abs(delta_deg) // chunk_deg)))
+    step = delta_deg / n
+    done = 0.0
+    for i in range(n):
+        before = read_joint()
+        expect_s = abs(step) / speed_dps
+        t0 = clock()
+        res = send_chunk(safety.wrap_deg(before + step), 2.0 * expect_s + 5.0)
+        took = clock() - t0
+        moved = safety.wrap_deg(read_joint() - before)
+        done += moved
+        out = {"rotated_deg": done, "chunks": i + 1, "of": n}
+        if not res.get("ok"):
+            return dict(res, **out)
+        if abs(moved - step) > tol_deg:
+            return dict(out, ok=False, event="ROTATION_MISMATCH (asked %.1f, got %.1f deg)" % (step, moved))
+        if abs(step) > 20.0 and took < ROTATE_MIN_TIME_FRAC * expect_s:
+            return dict(out, ok=False, event="SPEED_LIMIT_NOT_HONOURED (%.1f deg in %.2f s, expected >= %.2f s)"
+                        % (abs(step), took, expect_s))
+        if others_moved() > tol_deg:
+            return dict(out, ok=False, event="OTHER_JOINTS_MOVED")
+    return {"ok": True, "event": "ACTION_END", "rotated_deg": done, "chunks": n, "of": n}
+
+
+def rotate_joint(k, joint_index: int, delta_deg: float, speed_dps=None) -> dict:
+    """Spin a continuous joint (0-based index; J1, J4 or J6) by delta_deg at a capped speed.
+
+    UNVERIFIED ON THE ARM (2026-11-09): that firmware 2.5.2 applies JOINT_CONSTRAINT_SPEED to a
+    reach_joint_angles action, and that it takes the short way to a wrapped target. rotate_chunks
+    detects both failures on the first chunk; test with a small angle first.
+    """
+    from kortex_api.autogen.messages import Base_pb2
+    if safety.JOINT_LIMITS_DEG[joint_index] is not None:
+        raise safety.SafetyError("J%d is not a continuous joint" % (joint_index + 1))
+    speed = safety.clamp_speed(speed_dps or k.cfg.max_ang_speed, k.cfg.max_ang_speed)
+    start = state.joint_angles(k)
+
+    def send_chunk(target_deg, timeout_s):
+        angles = state.joint_angles(k)
+        angles[joint_index] = target_deg
+        safety.check_joints(angles)
+        action = Base_pb2.Action()
+        action.name = "kinova_cli_rotate_joint"
+        action.application_data = ""
+        for i, a in enumerate(angles):
+            ja = action.reach_joint_angles.joint_angles.joint_angles.add()
+            ja.joint_identifier = i
+            ja.value = a
+        action.reach_joint_angles.constraint.type = Base_pb2.JOINT_CONSTRAINT_SPEED
+        action.reach_joint_angles.constraint.value = speed
+        return _run(k, lambda: k.base.ExecuteAction(action), timeout=timeout_s)
+
+    def others_moved():
+        now = state.joint_angles(k)
+        return max(abs(safety.wrap_deg(a - b)) for i, (a, b) in enumerate(zip(now, start)) if i != joint_index)
+
+    return rotate_chunks(delta_deg, speed, lambda: state.joint_angles(k)[joint_index], send_chunk, others_moved)

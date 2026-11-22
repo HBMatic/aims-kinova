@@ -112,6 +112,31 @@ Retract ≈ 2 s each, joint error ≤ 0.14°; ±5 cm Cartesian error ≤ 0.5 mm.
 6. **Completion monitoring**: block on `ACTION_END/ABORT`. On timeout or Ctrl-C, `Base.Stop()` is sent.
 7. **Arm firmware**: joint/torque limits and protective stops.
 
+## Bounded routines and the motion server  *(added 2026-11-09, NOT yet run on an arm)*
+
+For scripted work with hundreds of small motions (e.g. turning Etch-a-Sketch knobs), a person approves one
+**envelope** instead of every command. Files: `python/kinova/envelope.py` (`Envelope`, `Routine`),
+`python/kinova/arms.py` (`RealArm`, `FakeArm`), `python/kinova/server.py`, `envelopes/*.json`.
+
+- An envelope fixes a tool-position box, "tool pointing down" within a tilt, speed caps, the one joint that may
+  spin and by how much per command, and limits on command count and duration. It can only tighten `safety.py`
+  and the `.env` speed caps; an envelope that asks for more is rejected.
+- `python3 -m kinova.server --envelope envelopes/etch_draw.json` (in the container use `--host 0.0.0.0`; the port
+  8765 is published to the Mac's localhost only) prints the envelope summary and waits for `yes`. The arm must
+  already be inside the envelope, so getting there from Home is still an ordinary, individually approved command.
+- Clients send JSON lines (`status`, `move_pose`, `rotate`, `gripper`, `stop`). They cannot approve, widen or restart
+  a routine. Any rejected command, abort, timeout, lost session or `stop` ends the routine: `Base.Stop()` is sent,
+  nothing is retried, and all later motion is refused until a person starts the server again.
+- The server holds one session and reads the arm state every 10 s when idle, because the session expires after 60 s.
+- `--fake` runs the same server on a `FakeArm` with no robot and no `kortex_api`, for developing clients.
+- `motion.rotate_joint` turns a continuous joint by any angle as absolute moves of at most 120 deg with a speed
+  constraint, verifying each chunk. **Unverified on the arm:** that firmware 2.5.2 honours
+  `JOINT_CONSTRAINT_SPEED` and takes the short way to a wrapped target. A chunk that finishes much faster than the
+  commanded speed implies is reported as `SPEED_LIMIT_NOT_HONOURED` and ends the routine. First test: a 10 deg
+  and then a 120 deg rotation of J6 in free space, each individually approved.
+- `envelopes/etch_draw.json` holds a PLACEHOLDER box; set it from the taught knob poses.
+- Offline tests: `python/tests/test_routine.py`.
+
 ### Why a Cartesian check isn't enough on its own
 The Base moves the tool in a straight line from p₀ to p₁: p(s) = (1−s)p₀ + s·p₁, s ∈ [0,1]. The sphere and
 the half-space z ≥ Z_MIN are **convex**, so if both endpoints are inside, every point on the segment is too.

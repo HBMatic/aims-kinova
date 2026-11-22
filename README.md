@@ -64,6 +64,7 @@ Then `make down`.
 |---|---|
 | `scripts/preflight.sh`, `scripts/mac_network_setup.sh` | Mac network setup and checks |
 | `scripts/remote_build.sh` | Build the image on a Linux server with rootless Docker, export it for `docker load` on the Mac |
+| `scripts/realsense_mac.sh`, `scripts/realsense_check.py` | Read-only: check a USB RealSense (D435 verified) on the Mac with `sudo`; see docs/04 |
 | `scripts/grab_wrist_frames.py` | Read-only: save one wrist colour + depth frame (needs `vision.launch`) |
 | `scripts/motion_selftest.py`, `scripts/ros_selftest.py` | End-to-end motion test (Python + ROS paths). **Moves the arm**: run only with the e-stop in reach |
 

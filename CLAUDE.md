@@ -11,6 +11,11 @@ Docs 01–03 are converted from the lab's official PDFs and are the source of tr
    Motion = `home`, `action`, `move-*`, `gripper`, any `roslaunch`/script that sends goals, MoveIt `go()`.
    Before asking for approval, state: current pose (`kinova status`), the target, the speed, and what could be hit.
    Ask the human to confirm the **e-stop is in reach** and the workspace/gripper path is clear.
+   **Bounded routines:** a human may approve one envelope (`envelopes/*.json`) by starting `python3 -m kinova.server`
+   and typing `yes` to its summary, or by telling the agent to start it with `--yes` after reading that summary in this
+   conversation. Commands inside the envelope then need no further approval until the routine ends. The agent must not
+   edit an envelope file, pass `--yes` without that approval, or restart an ended routine. Moving the arm into the
+   envelope is still approved per command. Details: `docs/05_codebase_and_safety.md` § Bounded routines.
 2. **Never** factory reset, reboot, change IP/network, firmware, user accounts or any shared arm setting
    (web UI or API: `SetIPv4Settings`, `Reboot*`, `UpdateFirmware`, `DeleteUserProfile`, `SetControlMode` to low-level, ...).
 3. **Never use the `admin` account.** Credentials come only from `.env` (`KINOVA_USERNAME`/`KINOVA_PASSWORD`). Never print or commit them.

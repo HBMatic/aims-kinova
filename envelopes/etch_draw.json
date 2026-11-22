@@ -1,0 +1,14 @@
+{
+  "name": "etch_draw",
+  "box_min": [0.30, -0.16, 0.07],
+  "box_max": [0.50, 0.16, 0.25],
+  "max_lin_speed": 0.05,
+  "max_ang_speed": 30.0,
+  "max_tilt_deg": 5.0,
+  "rotate_joint": 6,
+  "max_rotation_deg": 1800.0,
+  "max_step_m": 0.25,
+  "max_commands": 2000,
+  "max_duration_s": 1800.0,
+  "notes": "Etch-a-Sketch knob turning. PLACEHOLDER box: set it from the taught knob poses once the toy is fixed to the table."
+}

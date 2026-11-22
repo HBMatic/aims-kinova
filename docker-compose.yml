@@ -21,6 +21,7 @@ services:
     # ethernet via Docker Desktop's NAT (outbound TCP 10000 / UDP 10001 / RTSP-over-TCP 554).
     ports:
       - "127.0.0.1:6080:6080"   # noVNC (RViz / rqt in your browser)
+      - "127.0.0.1:8765:8765"   # kinova.server (bounded-routine motion server), Mac localhost only
     volumes:
       - ./python:/workspace/python
       - ./ros_ws/src:/workspace/ros_ws/src
