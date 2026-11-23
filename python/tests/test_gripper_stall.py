@@ -1,4 +1,4 @@
-"""motion.gripper ends a stalled grip with Base.Stop() (no arm, no kortex_api: both are faked)."""
+"""motion.gripper returns on a stall without sending Base.Stop() (no arm, no kortex_api: both are faked)."""
 import sys
 import types
 import unittest
@@ -57,13 +57,13 @@ class GripperStallTest(unittest.TestCase):
     def tearDown(self):
         self.mods.stop()
 
-    def test_stall_sends_stop_and_keeps_the_position(self):
+    def test_stall_returns_without_stop(self):
         base = FakeBase([0.30, 0.50, 0.70, 0.712])          # closes, then sits on the knob at 0.712
         r = self.motion.gripper(types.SimpleNamespace(base=base), 1.0, timeout=3.0)
         self.assertTrue(r["ok"])
         self.assertIn("STALLED", r["event"])
         self.assertAlmostEqual(r["position"], 0.712)
-        self.assertEqual(base.stops, 1)
+        self.assertEqual(base.stops, 0)                     # a stop could cut a slow gripper short
 
     def test_reaching_the_target_sends_no_stop(self):
         base = FakeBase([0.40, 0.449, 0.45])
