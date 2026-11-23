@@ -113,7 +113,11 @@ def move_joints(k, angles_deg) -> dict:
 
 def gripper(k, position: float, timeout=5.0, tol=0.01) -> dict:
     """Position mode, 0 = open, 1 = closed. Returns when the target is reached or the fingers stall
-    (stall = object grasped: position stops changing before reaching the target)."""
+    (stall = object grasped: position stops changing before reaching the target).
+
+    On a stall the command is ended with Base.Stop(); the fingers keep their grip and the knob still turns
+    with the wrist afterwards (blue arm 2026-11-22). Added while chasing rotate aborts that turned out to be
+    a speed limit (30 deg in 1 s is refused), so it is a precaution, not a proven fix."""
     from kortex_api.autogen.messages import Base_pb2
     position = min(max(float(position), 0.0), 1.0)
     cmd = Base_pb2.GripperCommand()
@@ -131,6 +135,7 @@ def gripper(k, position: float, timeout=5.0, tol=0.01) -> dict:
         if last is not None and abs(cur - last) < 1e-3:
             still_since = still_since or time.time()
             if time.time() - still_since > 0.5 and time.time() - t0 > 0.5:
+                stop(k)                                   # end the stalled command; the grip stays
                 return {"ok": True, "event": "STALLED (object?)", "position": cur}
         else:
             still_since = None
@@ -143,6 +148,7 @@ def gripper(k, position: float, timeout=5.0, tol=0.01) -> dict:
 ROTATE_CHUNK_DEG = 120.0      # well under 180 so each chunk's direction and read-back are unambiguous
 ROTATE_TOL_DEG = 1.5
 ROTATE_MIN_TIME_FRAC = 0.6    # a chunk that finishes much faster than commanded means the speed limit was ignored
+ROTATE_MIN_CHUNK_S = 1.0      # shortest duration given to one chunk (short durations can be refused as too fast)
 
 
 def rotate_chunks(delta_deg, speed_dps, read_joint, send_chunk, others_moved=lambda: 0.0,
@@ -181,9 +187,12 @@ def rotate_chunks(delta_deg, speed_dps, read_joint, send_chunk, others_moved=lam
 def rotate_joint(k, joint_index: int, delta_deg: float, speed_dps=None) -> dict:
     """Spin a continuous joint (0-based index; J1, J4 or J6) by delta_deg at a capped speed.
 
-    UNVERIFIED ON THE ARM (2026-11-09): that firmware 2.5.2 applies JOINT_CONSTRAINT_SPEED to a
-    reach_joint_angles action, and that it takes the short way to a wrapped target. rotate_chunks
-    detects both failures on the first chunk; test with a small angle first.
+    Each chunk is a reach_joint_angles action with a JOINT_CONSTRAINT_DURATION of |chunk| / speed
+    (at least ROTATE_MIN_CHUNK_S), which caps the joint speed. Firmware 2.5.2 on the blue arm aborted
+    the same action with JOINT_CONSTRAINT_SPEED (abort_details 1, METHOD_FAILED, 2026-11-22), while the
+    unconstrained move_joints with the same angles worked. The duration form works on the blue arm
+    (2026-11-22: 10 to 180 deg turns, 120 deg chunks, knob held), but 30 deg in 1 s (30 deg/s) is refused
+    the same way, while 30 deg in 2 s works: callers there use 15 deg/s.
     """
     from kortex_api.autogen.messages import Base_pb2
     if safety.JOINT_LIMITS_DEG[joint_index] is not None:
@@ -193,6 +202,7 @@ def rotate_joint(k, joint_index: int, delta_deg: float, speed_dps=None) -> dict:
 
     def send_chunk(target_deg, timeout_s):
         angles = state.joint_angles(k)
+        duration_s = max(abs(safety.wrap_deg(target_deg - angles[joint_index])) / speed, ROTATE_MIN_CHUNK_S)
         angles[joint_index] = target_deg
         safety.check_joints(angles)
         action = Base_pb2.Action()
@@ -202,8 +212,8 @@ def rotate_joint(k, joint_index: int, delta_deg: float, speed_dps=None) -> dict:
             ja = action.reach_joint_angles.joint_angles.joint_angles.add()
             ja.joint_identifier = i
             ja.value = a
-        action.reach_joint_angles.constraint.type = Base_pb2.JOINT_CONSTRAINT_SPEED
-        action.reach_joint_angles.constraint.value = speed
+        action.reach_joint_angles.constraint.type = Base_pb2.JOINT_CONSTRAINT_DURATION
+        action.reach_joint_angles.constraint.value = duration_s
         return _run(k, lambda: k.base.ExecuteAction(action), timeout=timeout_s)
 
     def others_moved():
